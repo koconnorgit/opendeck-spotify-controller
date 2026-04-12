@@ -1,0 +1,61 @@
+{
+  "Name": "Spotify Controller",
+  "Author": "koconnorgit",
+  "Version": "0.1.0",
+  "CodePaths": {
+    "x86_64-unknown-linux-gnu": "oa-spotify-controller-x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu": "oa-spotify-controller-aarch64-unknown-linux-gnu"
+  },
+  "CodePathLin": "oa-spotify-controller-x86_64-unknown-linux-gnu",
+  "OS": [
+    {
+      "Platform": "linux"
+    }
+  ],
+  "Category": "Spotify Controller",
+  "Description": "Control Spotify playback, volume, and display album art on your Stream Deck.",
+  "Icon": "img/icon",
+  "Actions": [
+    {
+      "Icon": "img/play-pause",
+      "Name": "Play / Pause",
+      "UUID": "com.opendeck.spotify-controller.play-pause",
+      "Tooltip": "Toggle Spotify playback",
+      "Controllers": ["Keypad"],
+      "States": [{}]
+    },
+    {
+      "Icon": "img/next",
+      "Name": "Next Track",
+      "UUID": "com.opendeck.spotify-controller.next-track",
+      "Tooltip": "Skip to the next track",
+      "Controllers": ["Keypad"],
+      "States": [{}]
+    },
+    {
+      "Icon": "img/prev",
+      "Name": "Previous Track",
+      "UUID": "com.opendeck.spotify-controller.prev-track",
+      "Tooltip": "Go to the previous track",
+      "Controllers": ["Keypad"],
+      "States": [{}]
+    },
+    {
+      "Icon": "img/dial",
+      "Name": "Spotify Dial",
+      "UUID": "com.opendeck.spotify-controller.dial",
+      "Tooltip": "Rotate for volume, press for play/pause. LCD shows album art.",
+      "Controllers": ["Encoder"],
+      "Encoder": {
+        "layout": "$B1",
+        "TriggerDescription": {
+          "Rotate": "Adjust volume",
+          "Push": "Play / Pause",
+          "Touch": "Play / Pause",
+          "LongTouch": ""
+        }
+      },
+      "States": [{}]
+    }
+  ]
+}

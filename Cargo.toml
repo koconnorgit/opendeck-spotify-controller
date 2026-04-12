@@ -1,0 +1,20 @@
+[package]
+name = "oa-spotify-controller"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+openaction = "2.5.0"
+tokio = { version = "1.45", features = ["full"] }
+zbus = { version = "5", features = ["tokio"] }
+futures-lite = "2.6.1"
+serde = "1.0"
+serde_json = "1.0"
+async-trait = "0.1"
+anyhow = "1.0"
+image = "0.24"
+base64 = "0.22"
+ab_glyph = "0.2"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+log = "0.4"
+simplelog = "0.12"
