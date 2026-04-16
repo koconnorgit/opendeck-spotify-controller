@@ -175,3 +175,33 @@ pub async fn fetch_album_art(url: &str) -> anyhow::Result<Vec<u8>> {
     let bytes = reqwest::get(url).await?.bytes().await?;
     Ok(bytes.to_vec())
 }
+
+/// Launch the Spotify desktop client, detached from this process so it
+/// outlives the plugin. Tries the native `spotify` binary first, then
+/// falls back to the Flatpak package.
+pub fn launch() -> anyhow::Result<()> {
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+
+    let mut last_err: Option<std::io::Error> = None;
+    for cmd in [
+        ("spotify", &[] as &[&str]),
+        ("flatpak", &["run", "com.spotify.Client"]),
+    ] {
+        match Command::new(cmd.0)
+            .args(cmd.1)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+        {
+            Ok(_) => return Ok(()),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(anyhow::anyhow!(
+        "failed to launch Spotify: {}",
+        last_err.map(|e| e.to_string()).unwrap_or_default()
+    ))
+}

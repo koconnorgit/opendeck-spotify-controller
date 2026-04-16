@@ -64,7 +64,14 @@ impl Action for PlayPauseAction {
     }
 
     async fn key_down(&self, instance: &Instance, _: &Self::Settings) -> OpenActionResult<()> {
-        if !is_active() { return Ok(()); }
+        if !is_active() {
+            if let Err(e) = spotify::launch() {
+                println!("spotify launch error: {e}");
+            }
+            // The monitoring loop will pick up Spotify once it registers on D-Bus
+            // and flip the UI to active.
+            return Ok(());
+        }
         if let Err(e) = spotify::play_pause().await {
             println!("play_pause error: {e}");
         }
@@ -185,7 +192,12 @@ impl Action for SpotifyDialAction {
     }
 
     async fn dial_down(&self, instance: &Instance, _: &Self::Settings) -> OpenActionResult<()> {
-        if !is_active() { return Ok(()); }
+        if !is_active() {
+            if let Err(e) = spotify::launch() {
+                println!("spotify launch error: {e}");
+            }
+            return Ok(());
+        }
         if let Err(e) = spotify::play_pause().await {
             println!("dial play_pause error: {e}");
         }
