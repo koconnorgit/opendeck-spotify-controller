@@ -7,7 +7,7 @@ An [OpenDeck](https://github.com/nekename/OpenDeck) plugin that gives you full c
 - **Play / Pause** button — toggles playback, icon reflects current state
 - **Next Track** / **Previous Track** buttons
 - **Encoder dial** (Stream Deck + / + XL) — rotate to adjust volume, press to play/pause
-- **LCD display** — shows album art, track title, and artist with a volume bar
+- **LCD display** — shows album art, track title, and artist alongside a volume bar and percent readout
 - **Scrolling text** — long titles and artist names scroll smoothly on the LCD
 - **Auto-detection** — buttons dim automatically when Spotify isn't running and light up when it launches
 
@@ -54,7 +54,7 @@ Open the OpenDeck interface and drag these actions onto your Stream Deck layout:
 | **Play / Pause** | Button | Toggles Spotify playback. Shows ▶ when paused, ⏸ when playing. |
 | **Next Track** | Button | Skips to the next track. |
 | **Previous Track** | Button | Goes back to the previous track. |
-| **Spotify Dial** | Encoder (SD+ / SD+ XL) | Rotate to adjust volume. Press to play/pause. The LCD shows album art, track title, artist, and a volume bar. |
+| **Spotify Dial** | Encoder (SD+ / SD+ XL) | Rotate to adjust volume. Press to play/pause. The 200×100 LCD shows album art on the left with track title, artist, a volume bar, and percent readout on the right. |
 
 When Spotify is not running, all buttons show dimmed icons and inputs are ignored. They activate automatically within ~1 second of Spotify launching.
 

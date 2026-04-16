@@ -6,7 +6,8 @@ use std::io::Cursor;
 use std::sync::LazyLock;
 
 const ICON_SIZE: u32 = 144;
-const LCD_SIZE: u32 = 100;
+const LCD_WIDTH: u32 = 200;
+const LCD_HEIGHT: u32 = 100;
 
 static TITLE_FONT: LazyLock<Option<FontArc>> = LazyLock::new(|| {
     let paths: &[&str] = &[
@@ -240,6 +241,78 @@ fn fill_rect(img: &mut RgbaImage, color: Rgba<u8>, x: u32, y: u32, w: u32, h: u3
     }
 }
 
+// ── Rounded-bar drawing ──────────────────────────────────────────────────────
+
+fn blend_colors(bg: Rgba<u8>, fg: Rgba<u8>, alpha: f32) -> Rgba<u8> {
+    let alpha = alpha.clamp(0.0, 1.0);
+
+    if bg[3] == 0 {
+        return Rgba([fg[0], fg[1], fg[2], (fg[3] as f32 * alpha) as u8]);
+    }
+
+    let fg_alpha = (fg[3] as f32 / 255.0) * alpha;
+    let bg_alpha = bg[3] as f32 / 255.0;
+    let final_alpha = fg_alpha + bg_alpha * (1.0 - fg_alpha);
+
+    if final_alpha == 0.0 {
+        return Rgba([0, 0, 0, 0]);
+    }
+
+    let r = ((fg[0] as f32 * fg_alpha + bg[0] as f32 * bg_alpha * (1.0 - fg_alpha)) / final_alpha) as u8;
+    let g = ((fg[1] as f32 * fg_alpha + bg[1] as f32 * bg_alpha * (1.0 - fg_alpha)) / final_alpha) as u8;
+    let b = ((fg[2] as f32 * fg_alpha + bg[2] as f32 * bg_alpha * (1.0 - fg_alpha)) / final_alpha) as u8;
+    let a = (final_alpha * 255.0) as u8;
+
+    Rgba([r, g, b, a])
+}
+
+fn rounded_rect_distance(px: f32, py: f32, x: f32, y: f32, w: f32, h: f32, r: f32) -> f32 {
+    let dx = (px - x - w / 2.0).abs() - (w / 2.0 - r);
+    let dy = (py - y - h / 2.0).abs() - (h / 2.0 - r);
+
+    let outside = (dx.max(0.0).powi(2) + dy.max(0.0).powi(2)).sqrt();
+    let inside = dx.max(dy).min(0.0);
+
+    outside + inside - r
+}
+
+/// Rounded-rect horizontal bar: track across the full width, leftmost
+/// `fill_ratio` portion uses `fill_color`, rest uses `track_color`.
+fn draw_horizontal_volume_bar(
+    img: &mut RgbaImage,
+    x: u32, y: u32, w: u32, h: u32, radius: u32,
+    track_color: Rgba<u8>,
+    fill_color: Rgba<u8>,
+    fill_ratio: f32,
+) {
+    let x_f = x as f32;
+    let y_f = y as f32;
+    let w_f = w as f32;
+    let h_f = h as f32;
+    let r = radius as f32;
+    let fill_x_max = x_f + w_f * fill_ratio.clamp(0.0, 1.0);
+
+    let min_x = x.saturating_sub(1);
+    let max_x = (x + w + 1).min(img.width());
+    let min_y = y.saturating_sub(1);
+    let max_y = (y + h + 1).min(img.height());
+
+    for py in min_y..max_y {
+        for px in min_x..max_x {
+            let px_f = px as f32 + 0.5;
+            let py_f = py as f32 + 0.5;
+            let d = rounded_rect_distance(px_f, py_f, x_f, y_f, w_f, h_f, r);
+            if d > 0.5 {
+                continue;
+            }
+            let coverage = (0.5 - d).clamp(0.0, 1.0);
+            let color = if px_f < fill_x_max { fill_color } else { track_color };
+            let bg = *img.get_pixel(px, py);
+            img.put_pixel(px, py, blend_colors(bg, color, coverage));
+        }
+    }
+}
+
 // ── Keypad button icons (144x144) ────────────────────────────────────────────
 
 pub fn play_icon() -> Result<String> {
@@ -303,22 +376,52 @@ pub fn inactive_prev_icon() -> Result<String> {
 
 /// Dark encoder LCD shown when Spotify is not running.
 pub fn inactive_encoder_lcd() -> Result<String> {
-    let mut img = RgbaImage::from_pixel(LCD_SIZE, LCD_SIZE, Rgba([18, 18, 18, 255]));
-    draw_text_centered(&mut img, "Spotify", 0, 30, LCD_SIZE, 16.0, Rgba([60, 60, 60, 255]));
-    draw_text_centered(&mut img, "not running", 0, 50, LCD_SIZE, 12.0, Rgba([50, 50, 50, 255]));
+    let mut img = RgbaImage::from_pixel(LCD_WIDTH, LCD_HEIGHT, Rgba([18, 18, 18, 255]));
+    draw_text_centered(&mut img, "Spotify", 0, 30, LCD_WIDTH, 22.0, Rgba([60, 60, 60, 255]));
+    draw_text_centered(&mut img, "not running", 0, 58, LCD_WIDTH, 16.0, Rgba([50, 50, 50, 255]));
     image_to_data_uri(&img)
 }
 
-// ── Encoder LCD (100x100) ────────────────────────────────────────────────────
+// ── Encoder LCD (200x100) ────────────────────────────────────────────────────
+//
+// Layout (top-left origin):
+//   - Album art: 96x96, x=2..98, y=2..98
+//   - Right column: x=102..198 (96px wide, 4px side padding → 88px content)
+//       - Title:   y=2,  22px, scrolls if overflowing
+//       - Artist:  y=28, 14px, scrolls if overflowing
+//       - Vol bar: x=108..192 (84px), y=54, h=12, radius 6 (Spotify green)
+//       - Percent: y=70, 20px, centered
+//   - Whole image dimmed to ~0.45 when paused.
 
 // Font sizes and content width used by both gfx and scroll modules.
-pub const LCD_TITLE_SIZE: f32 = 18.0;
-pub const LCD_ARTIST_SIZE: f32 = 12.0;
-pub const LCD_CONTENT_W: u32 = 88;
+pub const LCD_TITLE_SIZE: f32 = 22.0;
+pub const LCD_ARTIST_SIZE: f32 = 14.0;
 pub const LCD_SCROLL_GAP: f32 = 30.0;
 
-/// Render the encoder LCD image showing track title, artist, album art,
-/// and a volume bar on the right edge.
+const ART_SIZE: u32 = 96;
+const ART_X_OFF: i32 = 2;
+const ART_Y_OFF: i32 = 2;
+
+const RIGHT_X: u32 = 102;
+const RIGHT_W: u32 = 96;
+const COL_PAD: u32 = 4;
+const COL_X: u32 = RIGHT_X + COL_PAD;      // 106
+const COL_W: u32 = RIGHT_W - COL_PAD * 2;  // 88
+
+const TITLE_Y: u32 = 2;
+const ARTIST_Y: u32 = 28;
+
+const BAR_X: u32 = RIGHT_X + 6; // 108
+const BAR_W: u32 = RIGHT_W - 12; // 84
+const BAR_Y: u32 = 54;
+const BAR_H: u32 = 12;
+const BAR_RADIUS: u32 = 6;
+
+const PCT_Y: u32 = 70;
+const PCT_SIZE: f32 = 20.0;
+
+/// Render the 200x100 encoder LCD: album art on the left, title/artist/volume
+/// bar/percent in the right column.
 ///
 /// `title_scroll` / `artist_scroll`: pixel offsets for scrolling text.
 /// Pass `None` to center-fit (static), or `Some((offset, text_width))` to scroll.
@@ -331,43 +434,17 @@ pub fn render_encoder_lcd(
     title_scroll: Option<(f32, f32)>,
     artist_scroll: Option<(f32, f32)>,
 ) -> Result<String> {
-    const CONTENT_W: u32 = LCD_CONTENT_W;
+    let mut img = RgbaImage::from_pixel(LCD_WIDTH, LCD_HEIGHT, Rgba([18, 18, 18, 255]));
 
-    let mut img = RgbaImage::from_pixel(LCD_SIZE, LCD_SIZE, Rgba([18, 18, 18, 255]));
-
-    // Title at top
-    let title_color = Rgba([230, 230, 230, 255]);
-    if let Some((offset, text_width)) = title_scroll {
-        draw_text_scrolling(
-            &mut img, title, 0, 0, CONTENT_W, LCD_TITLE_SIZE,
-            title_color, offset, text_width, LCD_SCROLL_GAP,
-        );
-    } else {
-        draw_text_centered(&mut img, title, 0, 0, CONTENT_W, LCD_TITLE_SIZE, title_color);
-    }
-
-    // Artist below title
-    let artist_color = Rgba([160, 160, 160, 255]);
-    if let Some((offset, text_width)) = artist_scroll {
-        draw_text_scrolling(
-            &mut img, artist, 0, 20, CONTENT_W, LCD_ARTIST_SIZE,
-            artist_color, offset, text_width, LCD_SCROLL_GAP,
-        );
-    } else {
-        draw_text_centered(&mut img, artist, 0, 20, CONTENT_W, LCD_ARTIST_SIZE, artist_color);
-    }
-
-    // Album art centered in main area
+    // --- Album art, left side ---
     if let Some(art_bytes) = art_data {
         if let Ok(art_img) = image::load_from_memory(art_bytes) {
-            let resized = art_img.resize(54, 54, image::imageops::FilterType::Lanczos3);
+            let resized = art_img.resize(ART_SIZE, ART_SIZE, image::imageops::FilterType::Lanczos3);
             let rgba = resized.to_rgba8();
-            let x_off = ((CONTENT_W - rgba.width()) / 2) as i32;
-            let y_off = 38i32;
             for (px, py, pixel) in rgba.enumerate_pixels() {
-                let x = px as i32 + x_off;
-                let y = py as i32 + y_off;
-                if x >= 0 && y >= 0 && (x as u32) < LCD_SIZE && (y as u32) < LCD_SIZE {
+                let x = px as i32 + ART_X_OFF;
+                let y = py as i32 + ART_Y_OFF;
+                if x >= 0 && y >= 0 && (x as u32) < LCD_WIDTH && (y as u32) < LCD_HEIGHT {
                     let a = pixel[3] as f32 / 255.0;
                     let bg = img.get_pixel(x as u32, y as u32);
                     let r = (pixel[0] as f32 * a + bg[0] as f32 * (1.0 - a)) as u8;
@@ -379,25 +456,42 @@ pub fn render_encoder_lcd(
         }
     }
 
-    // Volume bar on the right
-    const BAR_X: u32 = 90;
-    const BAR_W: u32 = 8;
-    const BAR_TOP: u32 = 4;
-    const BAR_BOT: u32 = 96;
-    let bar_h = BAR_BOT - BAR_TOP;
-    let filled_h = (bar_h as f32 * (volume_percent / 100.0).clamp(0.0, 1.0)) as u32;
-
-    // Track background
-    fill_rect(&mut img, Rgba([40, 40, 40, 255]), BAR_X, BAR_TOP, BAR_W, bar_h);
-
-    // Filled portion (Spotify green), bottom-up
-    let fill_color = Rgba([30, 215, 96, 255]);
-    let fill_start = BAR_BOT.saturating_sub(filled_h);
-    if filled_h > 0 {
-        fill_rect(&mut img, fill_color, BAR_X, fill_start, BAR_W, filled_h);
+    // --- Title ---
+    let title_color = Rgba([230, 230, 230, 255]);
+    if let Some((offset, text_width)) = title_scroll {
+        draw_text_scrolling(
+            &mut img, title, COL_X, TITLE_Y, COL_W, LCD_TITLE_SIZE,
+            title_color, offset, text_width, LCD_SCROLL_GAP,
+        );
+    } else {
+        draw_text_centered(&mut img, title, COL_X, TITLE_Y, COL_W, LCD_TITLE_SIZE, title_color);
     }
 
-    // Dim when paused
+    // --- Artist ---
+    let artist_color = Rgba([160, 160, 160, 255]);
+    if let Some((offset, text_width)) = artist_scroll {
+        draw_text_scrolling(
+            &mut img, artist, COL_X, ARTIST_Y, COL_W, LCD_ARTIST_SIZE,
+            artist_color, offset, text_width, LCD_SCROLL_GAP,
+        );
+    } else {
+        draw_text_centered(&mut img, artist, COL_X, ARTIST_Y, COL_W, LCD_ARTIST_SIZE, artist_color);
+    }
+
+    // --- Horizontal volume bar (Spotify green) ---
+    let track_color = Rgba([40, 40, 40, 255]);
+    let fill_color = Rgba([30, 215, 96, 255]);
+    let fill_ratio = (volume_percent / 100.0).clamp(0.0, 1.0);
+    draw_horizontal_volume_bar(
+        &mut img, BAR_X, BAR_Y, BAR_W, BAR_H, BAR_RADIUS,
+        track_color, fill_color, fill_ratio,
+    );
+
+    // --- Percent readout ---
+    let pct_str = format!("{}%", volume_percent.round() as i32);
+    draw_text_centered(&mut img, &pct_str, COL_X, PCT_Y, COL_W, PCT_SIZE, title_color);
+
+    // --- Dim overlay when paused ---
     if !is_playing {
         for pixel in img.pixels_mut() {
             pixel[0] = (pixel[0] as f32 * 0.45) as u8;

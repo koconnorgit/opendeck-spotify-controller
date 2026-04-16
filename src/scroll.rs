@@ -11,7 +11,7 @@ const SCROLL_SPEED_PX: f32 = 1.5;
 const TICK_INTERVAL_MS: u64 = 50;
 
 /// Maximum text width (pixels) before scrolling kicks in.
-/// LCD_CONTENT_W (88) minus a small margin.
+/// Right-column content width (88) minus a small margin.
 const MAX_TITLE_WIDTH: f32 = 84.0;
 const MAX_ARTIST_WIDTH: f32 = 84.0;
 
