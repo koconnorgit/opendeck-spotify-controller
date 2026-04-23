@@ -5,7 +5,7 @@ use std::sync::LazyLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
 
-use crate::{gfx, scroll, spotify};
+use crate::{gfx, scroll, spotify, tiles};
 
 const VOLUME_STEP: f64 = 0.05; // 5% per tick
 
@@ -26,7 +26,7 @@ pub struct ArtCache {
     pub data: Option<Vec<u8>>,
 }
 
-fn is_active() -> bool {
+pub fn is_active() -> bool {
     SPOTIFY_RUNNING.load(Ordering::Relaxed)
 }
 
@@ -210,6 +210,39 @@ impl Action for SpotifyDialAction {
     }
 }
 
+// ── Album Art Tile actions (Keypad, no-op on press) ─────────────────────────
+//
+// Each tile action expects N^2 instances arranged in a contiguous NxN block on
+// a single device. Position within the block is derived from each instance's
+// coordinates; misplaced instances show an error icon until arranged correctly.
+
+macro_rules! art_tile_action {
+    ($name:ident, $uuid_const:ident, $n:expr) => {
+        pub struct $name;
+
+        #[async_trait]
+        impl Action for $name {
+            const UUID: ActionUuid = tiles::$uuid_const;
+            type Settings = serde_json::Value;
+
+            async fn will_appear(&self, instance: &Instance, _: &Self::Settings) -> OpenActionResult<()> {
+                tiles::repaint_device(Self::UUID, $n, &instance.device_id).await;
+                Ok(())
+            }
+
+            async fn will_disappear(&self, instance: &Instance, _: &Self::Settings) -> OpenActionResult<()> {
+                tiles::repaint_device(Self::UUID, $n, &instance.device_id).await;
+                Ok(())
+            }
+        }
+    };
+}
+
+art_tile_action!(ArtTile1x1Action, TILE_1X1_UUID, 1);
+art_tile_action!(ArtTile2x2Action, TILE_2X2_UUID, 2);
+art_tile_action!(ArtTile3x3Action, TILE_3X3_UUID, 3);
+art_tile_action!(ArtTile4x4Action, TILE_4X4_UUID, 4);
+
 // ── State management ─────────────────────────────────────────────────────────
 
 /// Refresh cached state. Returns true if Spotify is running.
@@ -287,6 +320,7 @@ async fn show_all_inactive() {
         set_inactive_icon(&inst, gfx::inactive_encoder_lcd()).await;
         let _ = inst.set_title(Some(""), None).await;
     }
+    tiles::repaint_all().await;
 }
 
 async fn update_play_pause_icon(instance: &Instance) {
@@ -344,6 +378,7 @@ async fn update_all_encoder_lcds() {
 async fn update_all_ui() {
     update_all_play_pause_buttons().await;
     update_all_encoder_lcds().await;
+    tiles::repaint_all().await;
 }
 
 /// Background task that polls Spotify state every second and updates all
@@ -415,6 +450,10 @@ pub async fn init() -> OpenActionResult<()> {
     register_action(NextTrackAction).await;
     register_action(PrevTrackAction).await;
     register_action(SpotifyDialAction).await;
+    register_action(ArtTile1x1Action).await;
+    register_action(ArtTile2x2Action).await;
+    register_action(ArtTile3x3Action).await;
+    register_action(ArtTile4x4Action).await;
 
     run(std::env::args().collect()).await
 }

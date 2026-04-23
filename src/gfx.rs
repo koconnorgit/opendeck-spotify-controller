@@ -502,3 +502,45 @@ pub fn render_encoder_lcd(
 
     image_to_data_uri(&img)
 }
+
+// ── Album-art tile icons (144x144) ───────────────────────────────────────────
+
+/// Render the (tile_row, tile_col) tile of an NxN grid covering the album art.
+/// The source art is scaled to N*ICON_SIZE square; this button gets a 144x144
+/// slice of that, pushed out as a PNG data URI.
+pub fn render_art_tile(art_bytes: &[u8], n: u8, tile_row: u8, tile_col: u8) -> Result<String> {
+    let art = image::load_from_memory(art_bytes)?;
+    let full_side = ICON_SIZE * n as u32;
+    let scaled = art.resize_exact(full_side, full_side, image::imageops::FilterType::Lanczos3);
+    let cropped = image::imageops::crop_imm(
+        &scaled,
+        tile_col as u32 * ICON_SIZE,
+        tile_row as u32 * ICON_SIZE,
+        ICON_SIZE,
+        ICON_SIZE,
+    )
+    .to_image();
+    image_to_data_uri(&cropped)
+}
+
+/// Tile shown when the action's instances don't form a valid NxN block.
+pub fn misplaced_tile(n: u8) -> Result<String> {
+    let mut img = RgbaImage::from_pixel(ICON_SIZE, ICON_SIZE, Rgba([32, 8, 8, 255]));
+    let border = Rgba([200, 50, 50, 255]);
+    let thick: u32 = 6;
+    fill_rect(&mut img, border, 0, 0, ICON_SIZE, thick);
+    fill_rect(&mut img, border, 0, ICON_SIZE - thick, ICON_SIZE, thick);
+    fill_rect(&mut img, border, 0, 0, thick, ICON_SIZE);
+    fill_rect(&mut img, border, ICON_SIZE - thick, 0, thick, ICON_SIZE);
+    let label = format!("{}x{}", n, n);
+    draw_text_centered(&mut img, &label, 0, 40, ICON_SIZE, 32.0, Rgba([255, 220, 220, 255]));
+    draw_text_centered(&mut img, "arrange", 0, 78, ICON_SIZE, 16.0, Rgba([220, 180, 180, 255]));
+    draw_text_centered(&mut img, "as block", 0, 98, ICON_SIZE, 16.0, Rgba([220, 180, 180, 255]));
+    image_to_data_uri(&img)
+}
+
+/// Blank tile shown when Spotify isn't running (or no art cached yet).
+pub fn inactive_tile() -> Result<String> {
+    let img = RgbaImage::from_pixel(ICON_SIZE, ICON_SIZE, Rgba([18, 18, 18, 255]));
+    image_to_data_uri(&img)
+}

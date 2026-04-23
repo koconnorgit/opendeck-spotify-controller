@@ -56,6 +56,38 @@
         }
       },
       "States": [{}]
+    },
+    {
+      "Icon": "img/icon",
+      "Name": "Album Art 1x1",
+      "UUID": "com.opendeck.spotify-controller.art-1x1",
+      "Tooltip": "Display full album art on a single button.",
+      "Controllers": ["Keypad"],
+      "States": [{}]
+    },
+    {
+      "Icon": "img/icon",
+      "Name": "Album Art 2x2",
+      "UUID": "com.opendeck.spotify-controller.art-2x2",
+      "Tooltip": "Album art spread across 4 buttons. Place 4 copies in a 2x2 block.",
+      "Controllers": ["Keypad"],
+      "States": [{}]
+    },
+    {
+      "Icon": "img/icon",
+      "Name": "Album Art 3x3",
+      "UUID": "com.opendeck.spotify-controller.art-3x3",
+      "Tooltip": "Album art spread across 9 buttons. Place 9 copies in a 3x3 block.",
+      "Controllers": ["Keypad"],
+      "States": [{}]
+    },
+    {
+      "Icon": "img/icon",
+      "Name": "Album Art 4x4",
+      "UUID": "com.opendeck.spotify-controller.art-4x4",
+      "Tooltip": "Album art spread across 16 buttons. Place 16 copies in a 4x4 block.",
+      "Controllers": ["Keypad"],
+      "States": [{}]
     }
   ]
 }

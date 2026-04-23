@@ -4,6 +4,7 @@ mod gfx;
 mod plugin;
 mod scroll;
 mod spotify;
+mod tiles;
 
 #[tokio::main]
 async fn main() -> OpenActionResult<()> {

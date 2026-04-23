@@ -9,6 +9,7 @@ An [OpenDeck](https://github.com/nekename/OpenDeck) plugin that gives you full c
 - **Encoder dial** (Stream Deck + / + XL) — rotate to adjust volume, press to play/pause
 - **LCD display** — shows album art, track title, and artist alongside a volume bar and percent readout
 - **Scrolling text** — long titles and artist names scroll smoothly on the LCD
+- **Multi-button album art** — tile the currently-playing album art across 1×1, 2×2, 3×3, or 4×4 blocks of buttons
 - **Auto-detection** — buttons dim automatically when Spotify isn't running and light up when it launches
 
 ## Requirements
@@ -55,8 +56,21 @@ Open the OpenDeck interface and drag these actions onto your Stream Deck layout:
 | **Next Track** | Button | Skips to the next track. |
 | **Previous Track** | Button | Goes back to the previous track. |
 | **Spotify Dial** | Encoder (SD+ / SD+ XL) | Rotate to adjust volume. Press to play/pause. The 200×100 LCD shows album art on the left with track title, artist, a volume bar, and percent readout on the right. |
+| **Album Art 1×1** | Button | Displays the full album art on a single button. Press does nothing. |
+| **Album Art 2×2** | Button | Displays the album art spread across 4 buttons. Drop 4 copies into a contiguous 2×2 block. |
+| **Album Art 3×3** | Button | Displays the album art spread across 9 buttons. Drop 9 copies into a contiguous 3×3 block. |
+| **Album Art 4×4** | Button | Displays the album art spread across 16 buttons. Drop 16 copies into a contiguous 4×4 block. |
 
 When Spotify is not running, all buttons show dimmed icons and inputs are ignored. They activate automatically within ~1 second of Spotify launching.
+
+### Multi-button album art
+
+The Album Art N×N actions tile the currently-playing album art across a block of buttons. Because an OpenDeck plugin can only paint buttons it's been placed on, you need to drop **N² copies** of the action — one per tile. The plugin looks at the coordinates of all visible copies on the same device and auto-assigns each copy its slice of the art:
+
+- Drop all N² copies into a **contiguous N×N block** and the art tiles correctly across them.
+- Any other arrangement (missing copies, non-square bounding box, gaps, duplicates) shows a red **"N×N / arrange as block"** placeholder on every copy until you fix the layout.
+
+Position within the block is derived from each copy's row/column on the device — no per-button configuration needed. The tiles refresh whenever the playing track changes.
 
 ## How it works
 
