@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::LazyLock;
 use tokio::sync::OnceCell;
 use zbus::zvariant::OwnedValue;
 
@@ -170,9 +171,20 @@ fn fix_art_url(url: &str) -> String {
     }
 }
 
+/// Shared client so art downloads reuse connections. The timeout keeps a stalled
+/// request from holding up the one-second polling loop that awaits it.
+static HTTP: LazyLock<reqwest::Client> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .expect("failed to build HTTP client")
+});
+
 /// Download album art from a URL. Returns PNG/JPEG bytes.
 pub async fn fetch_album_art(url: &str) -> anyhow::Result<Vec<u8>> {
-    let bytes = reqwest::get(url).await?.bytes().await?;
+    // `error_for_status` matters here: without it a 404 body would be cached as
+    // if it were image data and only fail later, during decode.
+    let bytes = HTTP.get(url).send().await?.error_for_status()?.bytes().await?;
     Ok(bytes.to_vec())
 }
 

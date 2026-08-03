@@ -3,6 +3,7 @@ use openaction::global_events::{GlobalEventHandler, DidReceiveGlobalSettingsEven
 
 use std::sync::LazyLock;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
 use crate::{gfx, scroll, spotify, tiles};
@@ -22,8 +23,32 @@ pub static ART_CACHE: LazyLock<Mutex<ArtCache>> =
 
 #[derive(Default)]
 pub struct ArtCache {
+    /// URL of the art held in `data`.
     pub url: Option<String>,
     pub data: Option<Vec<u8>>,
+    /// Art we want but do not have yet, either never fetched or last fetch
+    /// failed. Retried from the polling loop until it lands.
+    pub pending: Option<String>,
+    /// Consecutive failures for `pending`, driving the retry backoff.
+    pub failures: u32,
+    /// Earliest time the next attempt for `pending` may run.
+    pub retry_at: Option<Instant>,
+}
+
+/// Backoff between retries of a failed art download: fast enough that a blip
+/// recovers within a second, slow enough that a permanently broken URL does not
+/// hammer the CDN once a second for the length of a track.
+fn art_retry_delay(failures: u32) -> Duration {
+    let shift = failures.saturating_sub(1).min(5);
+    (Duration::from_secs(1) * (1 << shift)).min(Duration::from_secs(30))
+}
+
+/// Outcome of a state poll.
+struct Refresh {
+    running: bool,
+    /// Whether the album art the UI should draw changed — including being
+    /// cleared — so callers know to repaint even if the track did not change.
+    art_changed: bool,
 }
 
 pub fn is_active() -> bool {
@@ -245,56 +270,112 @@ art_tile_action!(ArtTile4x4Action, TILE_4X4_UUID, 4);
 
 // ── State management ─────────────────────────────────────────────────────────
 
-/// Refresh cached state. Returns true if Spotify is running.
-async fn refresh_state() -> bool {
-    if let Some(new_state) = spotify::poll_state().await {
-        SPOTIFY_RUNNING.store(true, Ordering::Relaxed);
-
-        let mut state = STATE.lock().await;
-
-        // Capture old values before overwriting
-        let art_url_changed = state.track.art_url != new_state.track.art_url;
-        let state_title = state.track.title.clone();
-        let state_artist = state.track.artist.clone();
-        *state = new_state.clone();
-        drop(state);
-
-        // If track changed, re-sync scroll state and fetch new art
-        let track_changed = art_url_changed
-            || state_title != new_state.track.title
-            || state_artist != new_state.track.artist;
-
-        if track_changed {
-            scroll::sync(&new_state.track.title, &new_state.track.artist).await;
-        }
-
-        if art_url_changed {
-            if let Some(ref url) = new_state.track.art_url {
-                match spotify::fetch_album_art(url).await {
-                    Ok(data) => {
-                        let mut cache = ART_CACHE.lock().await;
-                        cache.url = Some(url.clone());
-                        cache.data = Some(data);
-                    }
-                    Err(e) => {
-                        println!("Failed to fetch album art: {e}");
-                        let mut cache = ART_CACHE.lock().await;
-                        cache.url = None;
-                        cache.data = None;
-                    }
-                }
-            } else {
-                let mut cache = ART_CACHE.lock().await;
-                cache.url = None;
-                cache.data = None;
-            }
-        }
-        true
-    } else {
+/// Refresh cached state, including a retry of any outstanding art download.
+async fn refresh_state() -> Refresh {
+    let Some(new_state) = spotify::poll_state().await else {
         SPOTIFY_RUNNING.store(false, Ordering::Relaxed);
         scroll::clear().await;
-        false
+        return Refresh { running: false, art_changed: false };
+    };
+
+    SPOTIFY_RUNNING.store(true, Ordering::Relaxed);
+
+    let mut state = STATE.lock().await;
+
+    // Capture old values before overwriting
+    let art_url_changed = state.track.art_url != new_state.track.art_url;
+    let state_title = state.track.title.clone();
+    let state_artist = state.track.artist.clone();
+    *state = new_state.clone();
+    drop(state);
+
+    // If track changed, re-sync scroll state
+    let track_changed = art_url_changed
+        || state_title != new_state.track.title
+        || state_artist != new_state.track.artist;
+
+    if track_changed {
+        scroll::sync(&new_state.track.title, &new_state.track.artist).await;
     }
+
+    Refresh {
+        running: true,
+        art_changed: sync_album_art(&new_state.track.art_url).await,
+    }
+}
+
+/// Bring the art cache in line with `wanted`, retrying earlier failures.
+///
+/// A failed download leaves the cache empty rather than falling back to the
+/// previous track's cover: a blank tile is an honest signal that art is
+/// missing, where stale art would quietly misrepresent what is playing.
+///
+/// Returns true if what the UI should draw changed.
+async fn sync_album_art(wanted: &Option<String>) -> bool {
+    let mut changed = false;
+
+    let attempt = {
+        let mut cache = ART_CACHE.lock().await;
+
+        if cache.url.as_ref() == wanted.as_ref() {
+            // Already holding the right art (or both are None: nothing to show).
+            cache.pending = None;
+        } else {
+            // Anything cached belongs to a different track — drop it now so it
+            // is never drawn alongside the wrong song.
+            changed |= cache.data.is_some();
+            cache.url = None;
+            cache.data = None;
+
+            if cache.pending.as_ref() != wanted.as_ref() {
+                // New target, so start its retry budget fresh.
+                cache.pending = wanted.clone();
+                cache.failures = 0;
+                cache.retry_at = None;
+            }
+        }
+
+        match cache.pending.clone() {
+            Some(url) if cache.retry_at.is_none_or(|at| Instant::now() >= at) => Some(url),
+            _ => None,
+        }
+    };
+
+    let Some(url) = attempt else {
+        return changed;
+    };
+
+    match spotify::fetch_album_art(&url).await {
+        Ok(data) => {
+            let mut cache = ART_CACHE.lock().await;
+            // The track may have moved on while the request was in flight.
+            if cache.pending.as_deref() == Some(url.as_str()) {
+                cache.url = Some(url);
+                cache.data = Some(data);
+                cache.pending = None;
+                cache.failures = 0;
+                cache.retry_at = None;
+                changed = true;
+            }
+        }
+        Err(e) => {
+            let mut cache = ART_CACHE.lock().await;
+            if cache.pending.as_deref() == Some(url.as_str()) {
+                cache.failures += 1;
+                let delay = art_retry_delay(cache.failures);
+                cache.retry_at = Some(Instant::now() + delay);
+                // `{e:#}` walks the whole source chain; reqwest's plain Display
+                // stops at "error sending request" and hides the actual cause.
+                println!(
+                    "Failed to fetch album art (attempt {}, retrying in {}s): {e:#}",
+                    cache.failures,
+                    delay.as_secs()
+                );
+            }
+        }
+    }
+
+    changed
 }
 
 // ── UI updates ───────────────────────────────────────────────────────────────
@@ -392,7 +473,8 @@ async fn monitoring_loop() {
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
-        let running = refresh_state().await;
+        let refresh = refresh_state().await;
+        let running = refresh.running;
 
         // Handle running state transitions
         if running != prev_running {
@@ -418,7 +500,10 @@ async fn monitoring_loop() {
         }
 
         let state = STATE.lock().await;
-        let changed = state.playing != prev_playing
+        // `art_changed` covers a retry landing (or art being dropped) on a track
+        // that is otherwise unchanged — without it the new cover never repaints.
+        let changed = refresh.art_changed
+            || state.playing != prev_playing
             || state.track.title != prev_title
             || (state.volume - prev_volume).abs() > 0.005;
 
